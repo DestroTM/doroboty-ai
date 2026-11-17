@@ -7,3 +7,11 @@ artifacts
 
 # Preserve the versioned reference byte-for-byte; checked by its own scripts.
 docs/design-system/agent-kit/
+
+# Generated offline readiness report (rendered by the production-readiness checker).
+docs/production-readiness.html
+
+# Local, untracked agent and editor configuration.
+.claude/
+.mcp.json
+.idea/

@@ -1,0 +1,38 @@
+name: Zgłoszenie problemu (testy prototypu)
+description: Coś nie działa w prototypie DoRoboty.ai? Opisz to tutaj.
+title: "[Zgłoszenie] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dziękujemy za pomoc w testach!
+
+        **To zgłoszenie jest publiczne.** Nie wpisuj danych osobowych, treści prawdziwego CV, haseł ani prywatnych wiadomości. Prototyp działa wyłącznie na fikcyjnych danych.
+  - type: textarea
+    id: co-sie-stalo
+    attributes:
+      label: Co się stało?
+      description: Opisz, co chcesz zrobić, czego się spodziewasz i co widzisz zamiast tego.
+    validations:
+      required: true
+  - type: input
+    id: persona
+    attributes:
+      label: Wybrana persona
+      description: Jeśli była wybrana, np. Anna Kowalska albo Karolina Wiśniewska.
+  - type: input
+    id: widok
+    attributes:
+      label: Widok w aplikacji
+      description: Uzupełnia się automatycznie, gdy otworzysz zgłoszenie z aplikacji.
+  - type: input
+    id: przegladarka
+    attributes:
+      label: Przeglądarka
+      description: Uzupełnia się automatycznie, gdy otworzysz zgłoszenie z aplikacji.
+  - type: textarea
+    id: szczegoly
+    attributes:
+      label: Szczegóły błędu
+      description: Uzupełniają się automatycznie, jeśli zgłaszasz problem z ekranu błędu.
+      render: text

@@ -1302,3 +1302,159 @@ test("recruiter adds an own question without a comment and the candidate answers
   await expect(last.locator(".inquiry-comment")).toHaveCount(0);
   await expect(panel.locator(".inquiry-comment")).toHaveCount(3);
 });
+
+test("unexpected page error shows recovery screen inside the shell without leaking data", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Forces a render error on the offer page only while the flag is set.
+  await page.addInitScript(() => {
+    // `format` is an accessor on the prototype, so wrap its original getter.
+    const original = Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype, "format")!;
+    Object.defineProperty(Intl.DateTimeFormat.prototype, "format", {
+      configurable: true,
+      get() {
+        if ((window as unknown as { __forceRenderError?: boolean }).__forceRenderError)
+          throw new Error("Wymuszony błąd testowy");
+        return original.get!.call(this);
+      },
+    });
+  });
+  const external: string[] = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+  });
+  await choose(page, "Anna Kowalska");
+  await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
+  await page.evaluate(() => {
+    (window as unknown as { __forceRenderError?: boolean }).__forceRenderError = true;
+  });
+  await page.goto("/#/oferty/ai-product-manager?q=prywatne-wyszukiwanie");
+
+  const heading = page.getByRole("heading", { name: "Coś poszło nie tak", level: 1 });
+  await expect(heading).toBeFocused();
+  await expect(page.getByRole("link", { name: "DoRoboty.ai" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pobierz kopię danych" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Skopiuj szczegóły błędu" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Skopiowano szczegóły" })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("Widok: #/oferty/ai-product-manager");
+  expect(copied).toContain("Błąd: Error: Wymuszony błąd testowy");
+  expect(copied).not.toContain("prywatne");
+  expect(copied).not.toContain("Anna");
+
+  const issue = new URL(
+    (await page.getByRole("link", { name: /Zgłoś problem na GitHubie/ }).getAttribute("href"))!,
+  );
+  expect(issue.searchParams.get("szczegoly")).toBe(copied);
+  expect(issue.href).not.toContain("prywatne");
+
+  await page.getByText("Co zawierają szczegóły?").click();
+  await expect(page.locator(".app-error pre")).toHaveText(copied);
+  const accessibility = await new AxeBuilder({ page }).include(".app-error").analyze();
+  expect(accessibility.violations).toEqual([]);
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await page.screenshot({ path: "artifacts/app-error-mobile.png", fullPage: true });
+
+  await page.evaluate(() => {
+    (window as unknown as { __forceRenderError?: boolean }).__forceRenderError = false;
+  });
+  await page.getByRole("link", { name: "Wróć na stronę główną" }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(heading).toHaveCount(0);
+  await page.goto("/#/oferty/ai-product-manager");
+  await expect(page.getByRole("heading", { level: 1 })).not.toHaveText("Coś poszło nie tak");
+  expect(external).toEqual([]);
+});
+
+test("report problem dialog explains public GitHub issues and links to a prefilled form", async ({
+  page,
+}) => {
+  const external: string[] = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+  });
+  await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
+  const trigger = page.getByRole("contentinfo").getByRole("button", { name: "Zgłoś problem" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Zgłoś problem" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("publiczne issue");
+  await expect(dialog).toContainText("Zgłoszenie jest publiczne.");
+  const link = dialog.getByRole("link", { name: /Otwórz zgłoszenie na GitHubie/ });
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  const url = new URL((await link.getAttribute("href"))!);
+  expect(url.origin + url.pathname).toBe("https://github.com/DestroTM/doroboty-ai/issues/new");
+  expect(url.searchParams.get("template")).toBe("zgloszenie-testera.yml");
+  expect(url.searchParams.get("widok")).toBe("#/oferty");
+  expect(url.href).not.toContain("prywatne");
+  const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await trigger.click();
+    const box = (await dialog.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await expect(dialog).toHaveCSS("opacity", "1");
+    if (width === 390) await page.screenshot({ path: "artifacts/report-problem-mobile.png" });
+    await dialog.getByRole("button", { name: "Zamknij", exact: true }).last().click();
+    await expect(dialog).toBeHidden();
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci");
+  const sidebarTrigger = page
+    .getByRole("navigation", { name: "Panel użytkownika" })
+    .getByRole("button", { name: "Zgłoś problem" });
+  await sidebarTrigger.click();
+  const sidebarUrl = new URL(
+    (await dialog.getByRole("link", { name: /Otwórz zgłoszenie/ }).getAttribute("href"))!,
+  );
+  expect(sidebarUrl.searchParams.get("widok")).toBe("#/app/kandydaci");
+  expect(sidebarUrl.href).not.toContain("Karolina");
+  await expect(dialog).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: "artifacts/report-problem-desktop.png" });
+  await page.keyboard.press("Escape");
+  await expect(sidebarTrigger).toBeFocused();
+  expect(external).toEqual([]);
+});
+
+test("platform illustration loads a small resized variant on phones", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const images: { url: string; bytes: number }[] = [];
+  page.on("response", async (r) => {
+    if (r.request().resourceType() === "image")
+      images.push({ url: r.url(), bytes: (await r.body()).length });
+  });
+  for (const path of ["/#/", "/#/oferty"]) {
+    await page.goto(path);
+    const art = page.getByRole("img", { name: "Dwie osoby pracujące razem z laptopem" });
+    await expect(art).toBeVisible();
+    await expect.poll(() => art.evaluate((img: HTMLImageElement) => img.complete)).toBe(true);
+    expect(await art.evaluate((img: HTMLImageElement) => img.currentSrc)).toMatch(
+      /people-\d+.*\.webp$/,
+    );
+  }
+  expect(images.some((image) => image.url.includes("people") && image.url.endsWith(".png"))).toBe(
+    false,
+  );
+  for (const image of images.filter((image) => image.url.includes("people")))
+    expect(image.bytes).toBeLessThan(100_000);
+});
