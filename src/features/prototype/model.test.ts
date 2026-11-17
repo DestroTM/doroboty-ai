@@ -139,3 +139,203 @@ describe("coherent browser scenario", () => {
     ).toThrow();
   });
 });
+describe("pre-invitation questions", () => {
+  const id = "application-anna";
+  const answer = "Odpowiadałam za zakres asystenta i kryteria gotowości.";
+  function prepared() {
+    return transition(
+      as(submitted(), "employer-brightlabs"),
+      { type: "inquiry_prepare", applicationId: id },
+      time,
+    );
+  }
+  function edited() {
+    let s = prepared();
+    s = transition(s, {
+      type: "inquiry_question",
+      applicationId: id,
+      questionId: "q1",
+      status: "approved",
+      text: "Zmienione pytanie o własną pracę?",
+    });
+    return transition(s, {
+      type: "inquiry_question",
+      applicationId: id,
+      questionId: "q3",
+      status: "skipped",
+      text: s.applications.at(-1)!.inquiry!.questions[2].text,
+    });
+  }
+  const sent = () => transition(edited(), { type: "inquiry_send", applicationId: id }, time);
+  it("prepares scenario questions ready to use, with a basis found in the submitted CV", () => {
+    const inquiry = prepared().applications.at(-1)!.inquiry!;
+    expect(inquiry.status).toBe("draft");
+    expect(inquiry.questions).toHaveLength(3);
+    for (const question of inquiry.questions) {
+      expect(question.status).toBe("approved");
+      if (question.basis) expect(prepared().applications.at(-1)!.cv).toContain(question.basis);
+    }
+    expect(() => transition(prepared(), { type: "inquiry_prepare", applicationId: id })).toThrow(
+      "już przygotowane",
+    );
+  });
+  it("sends only kept questions and keeps the prepared wording", () => {
+    let none = prepared();
+    for (const question of none.applications.at(-1)!.inquiry!.questions)
+      none = transition(none, {
+        type: "inquiry_question",
+        applicationId: id,
+        questionId: question.id,
+        status: "skipped",
+        text: question.text,
+      });
+    expect(() => transition(none, { type: "inquiry_send", applicationId: id })).toThrow(
+      "co najmniej jedno",
+    );
+    const inquiry = sent().applications.at(-1)!.inquiry!;
+    expect(inquiry.status).toBe("sent");
+    expect(inquiry.questions.map((x) => x.status)).toEqual(["approved", "approved", "skipped"]);
+    expect(inquiry.questions[0].text).toBe("Zmienione pytanie o własną pracę?");
+    expect(inquiry.questions[0].proposed).not.toBe(inquiry.questions[0].text);
+    expect(() =>
+      transition(sent(), {
+        type: "inquiry_question",
+        applicationId: id,
+        questionId: "q3",
+        status: "approved",
+        text: "Późna zmiana?",
+      }),
+    ).toThrow("już wysłane");
+  });
+  it("accepts complete candidate answers once", () => {
+    const candidate = as(sent(), "candidate-anna");
+    expect(() =>
+      transition(candidate, { type: "inquiry_answer", applicationId: id, answers: { q1: answer } }),
+    ).toThrow("co najmniej");
+    const done = transition(
+      candidate,
+      { type: "inquiry_answer", applicationId: id, answers: { q1: answer, q2: answer } },
+      time,
+    );
+    const inquiry = done.applications.at(-1)!.inquiry!;
+    expect(inquiry.status).toBe("answered");
+    expect(inquiry.questions.map((x) => x.answer)).toEqual([answer, answer, ""]);
+    expect(done.applications.at(-1)!.stage).toBe("submitted");
+    expect(() =>
+      transition(done, {
+        type: "inquiry_answer",
+        applicationId: id,
+        answers: { q1: answer, q2: answer },
+      }),
+    ).toThrow("nie można już");
+  });
+  it("keeps questions for the conversation without sending them and stores recruiter notes", () => {
+    let s = transition(edited(), { type: "inquiry_interview", applicationId: id, on: true });
+    expect(s.applications.at(-1)!.inquiry!.status).toBe("interview");
+    expect(s.applications.at(-1)!.inquiry!.sentAt).toBeUndefined();
+    expect(() =>
+      transition(as(s, "candidate-anna"), {
+        type: "inquiry_answer",
+        applicationId: id,
+        answers: { q1: answer, q2: answer },
+      }),
+    ).toThrow("nie można już");
+    expect(() => transition(s, { type: "inquiry_send", applicationId: id })).toThrow();
+    const back = transition(s, { type: "inquiry_interview", applicationId: id, on: false });
+    expect(back.applications.at(-1)!.inquiry!.status).toBe("draft");
+    for (const stage of ["reviewed", "interview_invited"] as const)
+      s = transition(s, { type: "stage", applicationId: id, stage, note: "" }, time);
+    s = transition(s, {
+      type: "inquiry_notes",
+      applicationId: id,
+      notes: { q1: "Opisała własną decyzję o zakresie." },
+    });
+    expect(s.applications.at(-1)!.inquiry!.questions[0].note).toBe(
+      "Opisała własną decyzję o zakresie.",
+    );
+    expect(() =>
+      transition(s, { type: "inquiry_interview", applicationId: id, on: false }),
+    ).toThrow("przed zaproszeniem");
+    expect(() =>
+      transition(as(s, "employer-northstar"), {
+        type: "inquiry_notes",
+        applicationId: id,
+        notes: { q1: "x" },
+      }),
+    ).toThrow("Nie znaleziono");
+  });
+  it("lets the recruiter add, edit and remove own questions up to the limit", () => {
+    const add = (state: State, text: string) =>
+      transition(state, { type: "inquiry_add", applicationId: id, text });
+    let s = add(prepared(), "  Jak dzielisz pracę z zespołem danych?  ");
+    const own = s.applications.at(-1)!.inquiry!.questions.at(-1)!;
+    expect(own).toMatchObject({
+      id: "own1",
+      own: true,
+      status: "approved",
+      text: "Jak dzielisz pracę z zespołem danych?",
+      expect: "",
+    });
+    expect(() => add(s, "   ")).toThrow("puste");
+    s = transition(s, {
+      type: "inquiry_question",
+      applicationId: id,
+      questionId: "own1",
+      status: "approved",
+      text: "Jak dzielisz pracę z analitykami?",
+    });
+    const edited = s.applications.at(-1)!.inquiry!.questions.at(-1)!;
+    expect(edited.proposed).toBe(edited.text);
+    s = add(s, "Drugie własne pytanie?");
+    expect(() => add(s, "Szóste pytanie?")).toThrow("najwyżej 5");
+    expect(() =>
+      transition(s, { type: "inquiry_remove", applicationId: id, questionId: "q1" }),
+    ).toThrow("tylko własne");
+    s = transition(s, { type: "inquiry_remove", applicationId: id, questionId: "own1" });
+    expect(s.applications.at(-1)!.inquiry!.questions.map((x) => x.id)).toEqual([
+      "q1",
+      "q2",
+      "q3",
+      "own2",
+    ]);
+    const done = transition(s, { type: "inquiry_send", applicationId: id }, time);
+    expect(() => add(done, "Za późno?")).toThrow("już wysłane");
+    expect(() =>
+      transition(as(done, "candidate-anna"), {
+        type: "inquiry_answer",
+        applicationId: id,
+        answers: { q1: answer, q2: answer, q3: answer },
+      }),
+    ).toThrow("co najmniej");
+  });
+  it("enforces company, candidate and stage boundaries", () => {
+    expect(() =>
+      transition(as(submitted(), "employer-northstar"), {
+        type: "inquiry_prepare",
+        applicationId: id,
+      }),
+    ).toThrow("Nie znaleziono");
+    expect(() =>
+      transition(as(sent(), "candidate-marek"), {
+        type: "inquiry_answer",
+        applicationId: id,
+        answers: { q1: answer, q2: answer },
+      }),
+    ).toThrow("Nie znaleziono");
+    let invited = as(submitted(), "employer-brightlabs");
+    for (const stage of ["reviewed", "interview_invited"] as const)
+      invited = transition(invited, { type: "stage", applicationId: id, stage, note: "" }, time);
+    expect(() => transition(invited, { type: "inquiry_prepare", applicationId: id })).toThrow(
+      "przed zaproszeniem",
+    );
+  });
+  it("rejects imported questions that claim sending without a date and accepts saves without notes", () => {
+    const broken = sent();
+    delete broken.applications.at(-1)!.inquiry!.sentAt;
+    expect(stateSchema.safeParse(broken).success).toBe(false);
+    expect(stateSchema.safeParse(submitted()).success).toBe(true);
+    const legacy = JSON.parse(JSON.stringify(sent()));
+    for (const question of legacy.applications.at(-1).inquiry.questions) delete question.note;
+    expect(stateSchema.parse(legacy).applications.at(-1)!.inquiry!.questions[0].note).toBe("");
+  });
+});

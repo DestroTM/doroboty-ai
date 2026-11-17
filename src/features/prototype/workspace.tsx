@@ -16,6 +16,7 @@ import { CvAttachment } from "./cv-attachment";
 import { MatchScore } from "./match-score";
 import { RecruitingApplication } from "./recruiting-application";
 import { CandidateApplication } from "./candidate-application";
+import { inquiryStatusLine } from "./inquiry";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -451,6 +452,11 @@ export function ApplicationsPage({ employer = false }: { employer?: boolean }) {
                       : state.companies.find((x) => x.id === a.companyId)?.name}
                   </p>
                   <p>{stageLabels[a.stage]}</p>
+                  {inquiryStatusLine(a, employer ? "employer" : "candidate") && (
+                    <p className="inquiry-status">
+                      {inquiryStatusLine(a, employer ? "employer" : "candidate")}
+                    </p>
+                  )}
                 </div>
                 <MatchScore score={a.score} />
               </div>

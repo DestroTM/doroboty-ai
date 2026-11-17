@@ -7,12 +7,20 @@ type RecordSection = { value: string; label: string; content: ReactNode };
 export function RecordSheet({
   label,
   sections,
+  defaultSection,
+  section,
+  onSectionChange,
   attachment,
   children,
   footer,
 }: {
   label: string;
   sections: RecordSection[];
+  /** Initially active section value; falls back to the first section. */
+  defaultSection?: string;
+  /** Controlled active section; pass together with onSectionChange. */
+  section?: string;
+  onSectionChange?: (value: string) => void;
   attachment?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
@@ -20,7 +28,15 @@ export function RecordSheet({
   return (
     <section className="record-sheet" aria-label={label}>
       <h2 className="sr-only">{label}</h2>
-      <Tabs.Root defaultValue={sections[0]?.value}>
+      <Tabs.Root
+        value={section}
+        onValueChange={onSectionChange && ((value) => onSectionChange(String(value)))}
+        defaultValue={
+          sections.some((item) => item.value === defaultSection)
+            ? defaultSection
+            : sections[0]?.value
+        }
+      >
         <Tabs.List className="record-tabs" aria-label={label} activateOnFocus>
           {sections.map((section) => (
             <Tabs.Tab

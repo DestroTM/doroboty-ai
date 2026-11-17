@@ -2,6 +2,7 @@ import { z } from "zod";
 import marketplace from "./data/marketplace.json" with { type: "json" };
 import people from "./data/people.json" with { type: "json" };
 import type { JobWithCompany } from "@/features/jobs/types";
+import { preparedQuestions } from "./inquiry-scenarios";
 
 const id = z
   .string()
@@ -104,6 +105,50 @@ export const nextStages: Record<Stage, Stage[]> = {
   withdrawn: [],
   hired: [],
 };
+export const MIN_INQUIRY_ANSWER_LENGTH = 20;
+/** Stages in which pre-invitation questions can still be prepared, edited and sent. */
+export const inquiryStages: readonly Stage[] = ["submitted", "reviewed"];
+const inquiryQuestionSchema = z.object({
+  id,
+  proposed: text.min(1),
+  text: text.min(1),
+  status: z.enum(["proposed", "approved", "skipped"]),
+  basis: text,
+  purpose: text,
+  expect: text,
+  warning: text,
+  verify: text,
+  answer: text,
+  /** Recruiter's own note taken while asking the question in a conversation. */
+  note: text.default(""),
+  /** Written by the recruiter; has no prepared comment or basis. */
+  own: z.boolean().default(false),
+});
+export const MAX_INQUIRY_QUESTIONS = 5;
+const inquirySchema = z
+  .object({
+    status: z.enum(["draft", "interview", "sent", "answered"]),
+    preparedAt: z.iso.datetime(),
+    sentAt: z.iso.datetime().optional(),
+    answeredAt: z.iso.datetime().optional(),
+    questions: z.array(inquiryQuestionSchema).min(1).max(MAX_INQUIRY_QUESTIONS),
+  })
+  .refine(
+    (inquiry) => {
+      const sent = inquiry.questions.filter((x) => x.status === "approved");
+      if (new Set(inquiry.questions.map((x) => x.id)).size !== inquiry.questions.length)
+        return false;
+      if (inquiry.status === "draft") return !inquiry.sentAt && !inquiry.answeredAt;
+      if (sent.length === 0 || inquiry.questions.some((x) => x.status === "proposed")) return false;
+      if (inquiry.status === "interview") return !inquiry.sentAt && !inquiry.answeredAt;
+      if (!inquiry.sentAt) return false;
+      if (inquiry.status === "sent") return !inquiry.answeredAt;
+      return (
+        !!inquiry.answeredAt && sent.every((x) => x.answer.length >= MIN_INQUIRY_ANSWER_LENGTH)
+      );
+    },
+    { message: "Invalid pre-invitation questions" },
+  );
 const applicationSchema = z.object({
   id,
   candidateId: id,
@@ -122,6 +167,7 @@ const applicationSchema = z.object({
     .array(z.object({ stage: z.enum(stages), at: z.iso.datetime(), note: text }))
     .min(1)
     .max(30),
+  inquiry: inquirySchema.optional(),
 });
 const draftSchema = z.object({
   candidateId: id,
@@ -197,6 +243,8 @@ export const stateSchema = z
 export type State = z.infer<typeof stateSchema>;
 export type Person = State["people"][number];
 export type Application = State["applications"][number];
+export type Inquiry = NonNullable<Application["inquiry"]>;
+export type InquiryQuestion = Inquiry["questions"][number];
 export type Action =
   | { type: "select_person"; id: string | null }
   | { type: "profile"; value: z.infer<typeof profileSchema> }
@@ -212,6 +260,20 @@ export type Action =
     }
   | { type: "stage"; applicationId: string; stage: Stage; note: string }
   | { type: "withdraw"; applicationId: string }
+  | { type: "inquiry_prepare"; applicationId: string }
+  | {
+      type: "inquiry_question";
+      applicationId: string;
+      questionId: string;
+      status: InquiryQuestion["status"];
+      text: string;
+    }
+  | { type: "inquiry_add"; applicationId: string; text: string }
+  | { type: "inquiry_remove"; applicationId: string; questionId: string }
+  | { type: "inquiry_send"; applicationId: string }
+  | { type: "inquiry_interview"; applicationId: string; on: boolean }
+  | { type: "inquiry_notes"; applicationId: string; notes: Record<string, string> }
+  | { type: "inquiry_answer"; applicationId: string; answers: Record<string, string> }
   | { type: "publish"; job: z.infer<typeof jobSchema> }
   | { type: "company"; name: string; description: string };
 
@@ -335,6 +397,117 @@ export function transition(
     }
     application.stage = stage;
     application.events.push({ stage, at: now, note: action.type === "stage" ? action.note : "" });
+  } else if (action.type === "inquiry_answer") {
+    const p = candidate();
+    const application = s.applications.find((x) => x.id === action.applicationId);
+    if (!application || application.candidateId !== p.id) return fail("Nie znaleziono aplikacji.");
+    const inquiry = application.inquiry;
+    if (
+      inquiry?.status !== "sent" ||
+      ["hired", "rejected", "withdrawn"].includes(application.stage)
+    )
+      return fail("Na te pytania nie można już odpowiedzieć.");
+    for (const question of inquiry.questions.filter((x) => x.status === "approved")) {
+      const answer = (action.answers[question.id] ?? "").trim();
+      if (answer.length < MIN_INQUIRY_ANSWER_LENGTH)
+        fail(`Odpowiedz na każde pytanie co najmniej ${MIN_INQUIRY_ANSWER_LENGTH} znakami.`);
+      question.answer = answer;
+    }
+    inquiry.status = "answered";
+    inquiry.answeredAt = now;
+  } else if (action.type === "inquiry_notes") {
+    const p = employer();
+    const application = s.applications.find((x) => x.id === action.applicationId);
+    if (!application || application.companyId !== p.companyId)
+      return fail("Nie znaleziono aplikacji.");
+    const inquiry = application.inquiry;
+    if (inquiry?.status !== "interview") return fail("Te pytania nie są przygotowane na rozmowę.");
+    for (const question of inquiry.questions)
+      if (question.id in action.notes) question.note = text.parse(action.notes[question.id]);
+  } else if (
+    action.type === "inquiry_prepare" ||
+    action.type === "inquiry_question" ||
+    action.type === "inquiry_add" ||
+    action.type === "inquiry_remove" ||
+    action.type === "inquiry_send" ||
+    action.type === "inquiry_interview"
+  ) {
+    const p = employer();
+    const application = s.applications.find((x) => x.id === action.applicationId);
+    if (!application || application.companyId !== p.companyId)
+      return fail("Nie znaleziono aplikacji.");
+    if (!inquiryStages.includes(application.stage))
+      fail("Pytania można wysłać tylko przed zaproszeniem na rozmowę.");
+    if (action.type === "inquiry_prepare") {
+      if (application.inquiry) fail("Pytania są już przygotowane.");
+      application.inquiry = {
+        status: "draft",
+        preparedAt: now,
+        questions: preparedQuestions(application.candidateId, application.cv).map(
+          ({ text: proposed, ...comment }, index) => ({
+            id: `q${index + 1}`,
+            proposed,
+            text: proposed,
+            status: "approved" as const,
+            ...comment,
+            answer: "",
+            note: "",
+            own: false,
+          }),
+        ),
+      };
+    } else if (action.type === "inquiry_interview" && !action.on) {
+      if (application.inquiry?.status !== "interview")
+        return fail("Te pytania nie są przygotowane na rozmowę.");
+      application.inquiry.status = "draft";
+    } else {
+      const inquiry = application.inquiry;
+      if (inquiry?.status !== "draft") return fail("Pytania zostały już wysłane.");
+      if (action.type === "inquiry_question") {
+        const question = inquiry.questions.find((x) => x.id === action.questionId);
+        if (!question) return fail("Nie znaleziono pytania.");
+        if (!action.text.trim()) fail("Pytanie nie może być puste.");
+        question.text = action.text.trim();
+        question.status = action.status;
+        // A recruiter's own question has no prepared wording to compare with.
+        if (question.own) question.proposed = question.text;
+      } else if (action.type === "inquiry_add") {
+        const wording = action.text.trim();
+        if (!wording) fail("Pytanie nie może być puste.");
+        if (inquiry.questions.length >= MAX_INQUIRY_QUESTIONS)
+          fail(`Możesz mieć najwyżej ${MAX_INQUIRY_QUESTIONS} pytań.`);
+        let number = 1;
+        while (inquiry.questions.some((x) => x.id === `own${number}`)) number++;
+        inquiry.questions.push({
+          id: `own${number}`,
+          proposed: wording,
+          text: wording,
+          status: "approved",
+          basis: "",
+          purpose: "",
+          expect: "",
+          warning: "",
+          verify: "",
+          answer: "",
+          note: "",
+          own: true,
+        });
+      } else if (action.type === "inquiry_remove") {
+        const index = inquiry.questions.findIndex((x) => x.id === action.questionId && x.own);
+        if (index < 0) return fail("Usunąć można tylko własne pytanie.");
+        inquiry.questions.splice(index, 1);
+      } else {
+        if (!inquiry.questions.some((x) => x.status === "approved"))
+          fail("Zostaw co najmniej jedno pytanie.");
+        for (const question of inquiry.questions)
+          if (question.status === "proposed") question.status = "skipped";
+        if (action.type === "inquiry_interview") inquiry.status = "interview";
+        else {
+          inquiry.status = "sent";
+          inquiry.sentAt = now;
+        }
+      }
+    }
   } else if (action.type === "publish") {
     const p = employer();
     const job = jobSchema.parse(action.job);
