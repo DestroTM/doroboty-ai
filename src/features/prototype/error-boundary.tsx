@@ -3,6 +3,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { downloadText } from "./download";
 import { errorReport, issueUrl } from "./error-report";
 import { STORAGE_KEY } from "./storage";
+import { captureException, posthogLogger } from "@/lib/posthog";
 
 function readRawSave() {
   try {
@@ -123,6 +124,12 @@ export class ErrorBoundary extends Component<
   state: BoundaryState = { failed: false, error: null };
   static getDerivedStateFromError(error: unknown): BoundaryState {
     return { failed: true, error };
+  }
+  componentDidCatch(error: unknown) {
+    posthogLogger.error("render_error_recovered", {
+      boundary_scope: this.props.standalone ? "application" : "route",
+    });
+    captureException(error);
   }
   render() {
     return this.state.failed ? (

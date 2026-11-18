@@ -1,8 +1,22 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { initialState } from "../../src/features/prototype/model";
 import { STORAGE_KEY } from "../../src/features/prototype/storage";
 import { readFile } from "node:fs/promises";
+
+/**
+ * PostHog analytics is the only third-party destination of production builds.
+ * Tests abort it so no test traffic reaches the real project, and leave it out
+ * of the "no external requests" assertions.
+ */
+const analytics = /^https:\/\/[^/]*\.posthog\.com\//;
+const isAnalytics = (url: string) => analytics.test(url);
+const test = base.extend({
+  page: async ({ page }, provide) => {
+    await page.route(analytics, (route) => route.abort());
+    await provide(page);
+  },
+});
 async function choose(page: Page, name: string) {
   await page.goto("/#/auth/sign-in");
   await page.getByRole("button", { name: `Wejdź jako ${name}`, exact: true }).click();
@@ -28,7 +42,8 @@ for (const [name, filename] of [
   }) => {
     const external: string[] = [];
     page.on("request", (request) => {
-      if (!request.url().startsWith("http://127.0.0.1:3106")) external.push(request.url());
+      if (!request.url().startsWith("http://127.0.0.1:3106") && !isAnalytics(request.url()))
+        external.push(request.url());
     });
     await choose(page, name);
     await page.goto("/#/app/profil");
@@ -91,7 +106,8 @@ test("published job → saved offer/draft → submitted application → employer
     if (
       !r.url().startsWith("http://127.0.0.1:3106") &&
       !r.url().startsWith("data:") &&
-      !r.url().startsWith("blob:")
+      !r.url().startsWith("blob:") &&
+      !isAnalytics(r.url())
     )
       external.push(r.url());
   });
@@ -256,7 +272,7 @@ test("map, hash deep links and unknown records work without external requests", 
 }) => {
   const external: string[] = [];
   page.on("request", (r) => {
-    if (r.url().startsWith("https://")) external.push(r.url());
+    if (r.url().startsWith("https://") && !isAnalytics(r.url())) external.push(r.url());
   });
   await page.goto("/#/oferty?view=map");
   await page
@@ -1323,7 +1339,8 @@ test("unexpected page error shows recovery screen inside the shell without leaki
   });
   const external: string[] = [];
   page.on("request", (r) => {
-    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+    if (!r.url().startsWith("http://127.0.0.1:3106") && !isAnalytics(r.url()))
+      external.push(r.url());
   });
   await choose(page, "Anna Kowalska");
   await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
@@ -1379,7 +1396,8 @@ test("report problem dialog explains public GitHub issues and links to a prefill
 }) => {
   const external: string[] = [];
   page.on("request", (r) => {
-    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+    if (!r.url().startsWith("http://127.0.0.1:3106") && !isAnalytics(r.url()))
+      external.push(r.url());
   });
   await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
   const trigger = page.getByRole("contentinfo").getByRole("button", { name: "Zgłoś problem" });

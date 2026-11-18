@@ -10,6 +10,7 @@ import {
 } from "./inquiry";
 import { inquiryStages, nextStages, stageLabels, type Application, type Stage } from "./model";
 import { usePrototype } from "./store";
+import { capture } from "@/lib/posthog";
 
 /** Decision wording on buttons; the recorded stage names stay unchanged. */
 const actionLabels: Partial<Record<Stage, string>> = {
@@ -64,6 +65,10 @@ export function RecruitingApplication({ application }: { application: Applicatio
         })
       )
         return;
+    capture("application_stage_changed", {
+      application_id: application.id,
+      stage,
+    });
     setNote("");
     setAnnouncement(`Zapisano etap: ${stageLabels[stage]}.`);
     pendingFocus.current = "status";
@@ -115,11 +120,11 @@ export function RecruitingApplication({ application }: { application: Applicatio
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      if (
-                        !application.inquiry &&
-                        !run({ type: "inquiry_prepare", applicationId: application.id })
-                      )
-                        return;
+                      if (!application.inquiry) {
+                        if (!run({ type: "inquiry_prepare", applicationId: application.id }))
+                          return;
+                        capture("inquiry_prepared", { application_id: application.id });
+                      }
                       pendingFocus.current = "questions";
                       setSection("questions");
                     }}

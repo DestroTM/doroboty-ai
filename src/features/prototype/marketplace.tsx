@@ -26,6 +26,7 @@ import { usePrototype } from "./store";
 import { currentPerson, publishedJobs } from "./model";
 import { NotFound } from "./shell";
 import { cn } from "@/lib/utils";
+import { capture } from "@/lib/posthog";
 
 function LocalMap({ jobs }: { jobs: JobWithCompany[] }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -147,6 +148,11 @@ export function JobsPage() {
       else next.delete(key);
     }
     setParams(next);
+    capture("job_search_submitted", {
+      has_query: Boolean(next.get("query")),
+      has_location: Boolean(next.get("location")),
+      result_count: filterJobs(all, parseJobFilters(Object.fromEntries(next))).length,
+    });
   }
   const locations = [...new Set(all.flatMap((x) => x.locations))];
   return (
@@ -426,7 +432,14 @@ export function JobPage() {
                     variant="outline"
                     aria-label="Zapisz ofertę"
                     aria-pressed={saved}
-                    onClick={() => run({ type: "toggle_saved", jobId: job.id })}
+                    onClick={() => {
+                      if (run({ type: "toggle_saved", jobId: job.id }))
+                        capture("job_saved_toggled", {
+                          job_id: job.id,
+                          job_category: job.category,
+                          saved: !saved,
+                        });
+                    }}
                   >
                     <Bookmark className={cn(saved && "fill-current")} />
                     Zapisz ofertę

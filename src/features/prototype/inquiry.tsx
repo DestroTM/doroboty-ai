@@ -9,6 +9,7 @@ import {
   type InquiryQuestion,
 } from "./model";
 import { usePrototype } from "./store";
+import { capture } from "@/lib/posthog";
 
 const dateFormat = new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeStyle: "short" });
 const terminalStages = ["hired", "rejected", "withdrawn"];
@@ -151,7 +152,8 @@ export function EmployerInquiry({
           <Button
             onClick={() => {
               focusAfter.current = "inquiry-heading";
-              run({ type: "inquiry_prepare", applicationId: application.id });
+              if (run({ type: "inquiry_prepare", applicationId: application.id }))
+                capture("inquiry_prepared", { application_id: application.id });
             }}
           >
             Przygotuj pytania
@@ -405,8 +407,13 @@ export function EmployerInquiry({
               disabled={kept === 0 || editing !== null}
               onClick={() => {
                 focusAfter.current = "inquiry-heading";
-                if (run({ type: "inquiry_send", applicationId: application.id }))
+                if (run({ type: "inquiry_send", applicationId: application.id })) {
+                  capture("inquiry_sent", {
+                    application_id: application.id,
+                    question_count: kept,
+                  });
                   setAnnouncement("Pytania zostały wysłane.");
+                }
               }}
             >
               Wyślij pytania kandydatowi
@@ -501,8 +508,13 @@ export function CandidateInquiry({
       return;
     }
     focusHeading.current = true;
-    if (run({ type: "inquiry_answer", applicationId: application.id, answers }))
+    if (run({ type: "inquiry_answer", applicationId: application.id, answers })) {
+      capture("inquiry_answers_submitted", {
+        application_id: application.id,
+        question_count: questions.length,
+      });
       setAnnouncement("Odpowiedzi zostały wysłane.");
+    }
   }
 
   if (answered || closed)

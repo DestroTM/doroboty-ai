@@ -4,6 +4,7 @@ import { ApplicationRecord } from "./application-record";
 import { CandidateInquiry, inquiryStatusLine, inquiryTimeline } from "./inquiry";
 import type { Application } from "./model";
 import { usePrototype } from "./store";
+import { capture } from "@/lib/posthog";
 
 export function CandidateApplication({ application }: { application: Application }) {
   const { state, run } = usePrototype();
@@ -68,6 +69,9 @@ export function CandidateApplication({ application }: { application: Application
                   variant="destructive"
                   onClick={() => {
                     if (run({ type: "withdraw", applicationId: application.id })) {
+                      capture("application_withdrawn", {
+                        application_id: application.id,
+                      });
                       focusAfter.current = "status";
                       setConfirming(false);
                       setAnnouncement("Aplikacja została wycofana.");
