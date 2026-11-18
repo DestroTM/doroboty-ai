@@ -1,8 +1,14 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
+import posthog from "posthog-js";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { downloadText } from "./download";
 import { errorReport, issueUrl } from "./error-report";
 import { STORAGE_KEY } from "./storage";
+import { posthogLogger } from "@/lib/posthog-logger";
+
+const posthogConfigured = Boolean(
+  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+);
 
 function readRawSave() {
   try {
@@ -123,6 +129,18 @@ export class ErrorBoundary extends Component<
   state: BoundaryState = { failed: false, error: null };
   static getDerivedStateFromError(error: unknown): BoundaryState {
     return { failed: true, error };
+  }
+  componentDidCatch(error: unknown) {
+    posthogLogger.error("render_error_recovered", {
+      boundary_scope: this.props.standalone ? "application" : "route",
+    });
+    if (posthogConfigured) {
+      try {
+        posthog.captureException(error);
+      } catch {
+        // Error reporting must not interfere with recovery.
+      }
+    }
   }
   render() {
     return this.state.failed ? (

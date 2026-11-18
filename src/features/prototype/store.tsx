@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { initialState, transition, type Action, type State } from "./model";
+import posthog from "posthog-js";
+import { currentPerson, initialState, transition, type Action, type State } from "./model";
 import { parseState, readState, saveState, type StoragePort } from "./storage";
+
+const posthogConfigured = Boolean(
+  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+);
 function browserStorage(): StoragePort | null {
   try {
     return window.localStorage;
@@ -15,6 +20,19 @@ function useStore() {
   const [error, setError] = useState("");
   const [blocked, setBlocked] = useState(loaded.blocked);
   const latest = useRef(state);
+  const identifiedPersonId = useRef<string | null>(null);
+  const activePerson = currentPerson(state);
+
+  function resetPosthogIdentity() {
+    if (!posthogConfigured) return;
+    try {
+      posthog.reset();
+    } catch {
+      // Analytics must not interfere with switching prototype people.
+    }
+    identifiedPersonId.current = null;
+  }
+
   function commit(next: State, replace = false) {
     latest.current = next;
     setState(next);
@@ -30,7 +48,14 @@ function useStore() {
   }
   function run(action: Action) {
     try {
-      commit(transition(latest.current, action));
+      const next = transition(latest.current, action);
+      if (
+        action.type === "select_person" &&
+        latest.current.activePersonId !== next.activePersonId &&
+        latest.current.activePersonId !== null
+      )
+        resetPosthogIdentity();
+      commit(next);
       return true;
     } catch (e) {
       setError(
@@ -44,6 +69,7 @@ function useStore() {
   function importState(raw: string) {
     try {
       const next = parseState(raw);
+      if (latest.current.activePersonId !== next.activePersonId) resetPosthogIdentity();
       commit(next, true);
       return true;
     } catch (e) {
@@ -54,6 +80,17 @@ function useStore() {
   useEffect(() => {
     document.documentElement.classList.remove("dark");
   }, []);
+
+  useEffect(() => {
+    if (!posthogConfigured || !activePerson || identifiedPersonId.current === activePerson.id)
+      return;
+    try {
+      posthog.identify(activePerson.id, { name: activePerson.name, role: activePerson.role });
+      identifiedPersonId.current = activePerson.id;
+    } catch {
+      // Analytics must not interfere with loading the prototype.
+    }
+  }, [activePerson]);
   return {
     state,
     issue,
@@ -63,7 +100,10 @@ function useStore() {
     run,
     importState,
     clearError: () => setError(""),
-    reset: () => commit(initialState(), true),
+    reset: () => {
+      if (latest.current.activePersonId !== null) resetPosthogIdentity();
+      commit(initialState(), true);
+    },
   };
 }
 type Store = ReturnType<typeof useStore>;

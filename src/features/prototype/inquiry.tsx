@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import posthog from "posthog-js";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -14,6 +15,9 @@ const dateFormat = new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeS
 const terminalStages = ["hired", "rejected", "withdrawn"];
 const prototypeNote =
   "Prototyp: pytania i komentarze są przygotowanymi wcześniej przykładami dla tej osoby. Nie pisze ich model AI.";
+const posthogConfigured = Boolean(
+  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+);
 
 export type InquiryEditing = { id: string; text: string } | null;
 
@@ -151,7 +155,11 @@ export function EmployerInquiry({
           <Button
             onClick={() => {
               focusAfter.current = "inquiry-heading";
-              run({ type: "inquiry_prepare", applicationId: application.id });
+              if (
+                run({ type: "inquiry_prepare", applicationId: application.id }) &&
+                posthogConfigured
+              )
+                posthog.capture("inquiry_prepared", { application_id: application.id });
             }}
           >
             Przygotuj pytania
@@ -405,8 +413,14 @@ export function EmployerInquiry({
               disabled={kept === 0 || editing !== null}
               onClick={() => {
                 focusAfter.current = "inquiry-heading";
-                if (run({ type: "inquiry_send", applicationId: application.id }))
+                if (run({ type: "inquiry_send", applicationId: application.id })) {
+                  if (posthogConfigured)
+                    posthog.capture("inquiry_sent", {
+                      application_id: application.id,
+                      question_count: kept,
+                    });
                   setAnnouncement("Pytania zostały wysłane.");
+                }
               }}
             >
               Wyślij pytania kandydatowi
@@ -501,8 +515,14 @@ export function CandidateInquiry({
       return;
     }
     focusHeading.current = true;
-    if (run({ type: "inquiry_answer", applicationId: application.id, answers }))
+    if (run({ type: "inquiry_answer", applicationId: application.id, answers })) {
+      if (posthogConfigured)
+        posthog.capture("inquiry_answers_submitted", {
+          application_id: application.id,
+          question_count: questions.length,
+        });
       setAnnouncement("Odpowiedzi zostały wysłane.");
+    }
   }
 
   if (answered || closed)

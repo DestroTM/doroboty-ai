@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { issueUrl } from "./error-report";
+import { posthogLogger } from "@/lib/posthog-logger";
 
 /**
  * "Zgłoś problem": C18 information dialog explaining that reports go to a
@@ -56,6 +57,9 @@ export function ReportProblem({
               href={issueUrl({ hash: window.location.hash, userAgent: navigator.userAgent })}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                posthogLogger.info("problem_report_opened", { source: "report_dialog" });
+              }}
             >
               Otwórz zgłoszenie na GitHubie
               <ArrowUpRight aria-hidden="true" />
