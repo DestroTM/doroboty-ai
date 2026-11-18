@@ -7,7 +7,7 @@ import { BackLink } from "@/components/back-link";
 import { ResponsivePanel } from "@/components/responsive-panel";
 import { SalaryFact } from "@/features/jobs/salary-fact";
 import { functionLabels } from "@/features/jobs/presentation";
-import peopleArt from "../../../docs/design-system/agent-kit/assets/people.png";
+import { PeopleArt } from "@/features/public/people-art";
 import { CompanyLogo } from "@/features/jobs/company-logo";
 import { JobCard } from "@/features/jobs/job-card";
 import { JobFiltersForm } from "@/features/jobs/job-filters";
@@ -166,11 +166,7 @@ export function JobsPage() {
                 Znajdź rolę, w której zrobisz coś dobrego.
               </p>
             </div>
-            <img
-              className="pp-people-art"
-              src={peopleArt}
-              alt="Dwie osoby pracujące razem z laptopem"
-            />
+            <PeopleArt className="pp-people-art" sizes="(max-width: 600px) 128px, 490px" />
           </div>
           <form
             key={`${filters.query ?? ""}:${filters.location ?? ""}`}
@@ -480,7 +476,7 @@ export function JobPage() {
                 Oferty tej firmy <ArrowRight />
               </Link>
             </div>
-            <img src={peopleArt} alt="" />
+            <PeopleArt sizes="180px" alt="" loading="lazy" />
           </div>
         </section>
       </div>

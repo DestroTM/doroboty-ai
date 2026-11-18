@@ -1,0 +1,5 @@
+# Netlify builds the static prototype from `main` (see docs/release.md).
+# Node.js version comes from .nvmrc. Hash routes need no redirect rules.
+[build]
+  command = "npm run build"
+  publish = "dist"

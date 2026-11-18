@@ -7,7 +7,7 @@ import { usePrototype } from "./store";
 import { publishedJobs } from "./model";
 import { cn } from "@/lib/utils";
 
-import peopleArt from "../../../docs/design-system/agent-kit/assets/people.png";
+import { PeopleArt } from "@/features/public/people-art";
 
 const categories = [
   {
@@ -58,7 +58,7 @@ export default function HomePage() {
               </Link>
             </div>
           </div>
-          <img className="people-art" src={peopleArt} alt="Dwie osoby pracujące razem z laptopem" />
+          <PeopleArt className="people-art" sizes="(max-width: 600px) 230px, 420px" />
         </div>
       </section>
 

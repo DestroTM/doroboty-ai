@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ApplicationRecord } from "./application-record";
+import { CandidateInquiry, inquiryStatusLine, inquiryTimeline } from "./inquiry";
 import type { Application } from "./model";
 import { usePrototype } from "./store";
 
@@ -8,6 +9,8 @@ export function CandidateApplication({ application }: { application: Application
   const { state, run } = usePrototype();
   const [confirming, setConfirming] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // Kept outside the tab panel so unsent answers survive tab changes.
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const statusRef = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -29,6 +32,26 @@ export function CandidateApplication({ application }: { application: Application
         audience="candidate"
         history={application.events.map(({ stage, at }) => ({ stage, at }))}
         statusRef={statusRef}
+        extraSections={
+          application.inquiry?.status === "sent" || application.inquiry?.status === "answered"
+            ? [
+                {
+                  value: "questions",
+                  label: "Pytania",
+                  content: (
+                    <CandidateInquiry
+                      application={application}
+                      companyName={company?.name ?? ""}
+                      answers={answers}
+                      onAnswersChange={setAnswers}
+                    />
+                  ),
+                },
+              ]
+            : []
+        }
+        defaultSection={inquiryStatusLine(application, "candidate") ? "questions" : undefined}
+        timelineExtras={inquiryTimeline(application, "candidate")}
         footer={
           terminal ? (
             <p className="record-caption">

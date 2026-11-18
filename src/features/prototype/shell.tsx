@@ -13,11 +13,14 @@ import {
   Building2,
   Settings,
   LayoutDashboard,
+  MessageSquareWarning,
 } from "lucide-react";
 import { BrandMark } from "@/features/public/brand-mark";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { currentPerson } from "./model";
 import { usePrototype } from "./store";
+import { ErrorBoundary } from "./error-boundary";
+import { ReportProblem } from "./report-problem";
 import { cn } from "@/lib/utils";
 const navigation = [
   { to: "/oferty", label: "Oferty" },
@@ -106,7 +109,9 @@ export function Shell() {
         </p>
       )}
       <div key={`${state.activePersonId}:${pathname}`}>
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </div>
     </>
   );
@@ -184,6 +189,12 @@ export function Shell() {
               <Link className="nav-link" to="/auth/sign-in">
                 Zmień osobę
               </Link>
+              <ReportProblem
+                trigger={<button type="button" className="nav-link w-full text-left" />}
+              >
+                <MessageSquareWarning className="size-4" />
+                Zgłoś problem
+              </ReportProblem>
             </nav>
           </aside>
           <div className="workspace">
@@ -301,6 +312,7 @@ export function Shell() {
                 <Link className="inline-flex items-center gap-1" to="/auth/sign-in">
                   Strefa case <ArrowUpRight className="size-4" />
                 </Link>
+                <ReportProblem trigger={<button type="button" />}>Zgłoś problem</ReportProblem>
               </nav>
             </div>
             <div className="px-5 py-4 text-xs text-muted-foreground shadow-[var(--gui-divider-top-shadow)] lg:px-8">

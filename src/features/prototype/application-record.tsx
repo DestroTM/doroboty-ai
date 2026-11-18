@@ -21,6 +21,11 @@ export function ApplicationRecord({
   statusRef,
   children,
   footer,
+  extraSections = [],
+  defaultSection,
+  section,
+  onSectionChange,
+  timelineExtras = [],
 }: {
   application: Pick<
     Application,
@@ -32,11 +37,32 @@ export function ApplicationRecord({
   statusRef?: Ref<HTMLSpanElement>;
   children?: ReactNode;
   footer?: ReactNode;
+  /** Role-specific tabs appended after the shared Answer/CV snapshots. */
+  extraSections?: { value: string; label: string; content: ReactNode }[];
+  defaultSection?: string;
+  section?: string;
+  onSectionChange?: (value: string) => void;
+  /** Recorded non-stage events, merged into the history by date. */
+  timelineExtras?: { title: string; at: string }[];
 }) {
   const candidate = audience === "candidate";
   const title = candidate ? application.jobTitle : application.candidateName;
   const context = candidate ? application.candidateName : application.jobTitle;
   const submitted = history[0];
+  const timeline = [
+    ...history.map((event, index) => ({
+      id: `${index}-${event.at}`,
+      title: stageLabels[event.stage],
+      dateTime: event.at,
+      content: event.note || undefined,
+    })),
+    ...timelineExtras.map((event) => ({
+      id: `${event.title}-${event.at}`,
+      title: event.title,
+      dateTime: event.at,
+      content: undefined,
+    })),
+  ].sort((a, b) => a.dateTime.localeCompare(b.dateTime));
   return (
     <article className="recruiting-record">
       <header className="recruiting-header">
@@ -67,6 +93,9 @@ export function ApplicationRecord({
       <div className="recruiting-layout">
         <RecordSheet
           label={candidate ? "Twoja wysłana aplikacja" : "Materiały kandydata"}
+          defaultSection={defaultSection}
+          section={section}
+          onSectionChange={onSectionChange}
           sections={[
             {
               value: "answer",
@@ -93,6 +122,7 @@ export function ApplicationRecord({
                 </>
               ),
             },
+            ...extraSections,
           ]}
           footer={footer}
         >
@@ -101,14 +131,7 @@ export function ApplicationRecord({
         <aside className="recruiting-margin" aria-label="Historia i podsumowanie">
           <section aria-labelledby="process-heading">
             <h2 id="process-heading">Historia procesu</h2>
-            <ProcessTimeline
-              items={history.map((event, index) => ({
-                id: `${index}-${event.at}`,
-                title: stageLabels[event.stage],
-                dateTime: event.at,
-                content: event.note || undefined,
-              }))}
-            />
+            <ProcessTimeline items={timeline} />
           </section>
           <section className="record-summary" aria-labelledby="summary-heading">
             <h2 id="summary-heading">Podsumowanie</h2>

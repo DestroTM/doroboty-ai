@@ -145,7 +145,7 @@ test("published job → saved offer/draft → submitted application → employer
     .getByLabel("Notatka rekrutacyjna (widoczna pracodawcy)")
     .fill("Notatka pracodawcy — tylko panel firmy.");
   await page.getByRole("button", { name: "W przeglądzie", exact: true }).click();
-  for (const label of ["Zaproszenie na rozmowę", "Pierwsza rozmowa odbyta", "Kolejny etap"])
+  for (const label of ["Zaproś na rozmowę", "Pierwsza rozmowa odbyta", "Kolejny etap"])
     await page.getByRole("button", { name: label, exact: true }).click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Zatrudnienie", exact: true })).toBeVisible();
@@ -732,7 +732,7 @@ test("process sheet keeps notes across keyboard tabs and saves stage history wit
   await page.reload();
   await expect(page.locator(".process-timeline")).toContainText(text);
   await note.fill("Zakończenie przykładowego procesu.");
-  await page.getByRole("button", { name: "Proces zakończony", exact: true }).click();
+  await page.getByRole("button", { name: "Odrzuć aplikację", exact: true }).click();
   await expect(page.locator(".record-stage")).toBeFocused();
   await expect(note).toHaveCount(0);
   await expect(page.locator(".record-actions")).toHaveCount(0);
@@ -994,4 +994,467 @@ test("candidate snapshot supports custom CV and long content at desktop and mobi
   await expect(page.getByRole("tabpanel", { name: "Odpowiedź", exact: true })).toContainText(
     record.answer,
   );
+});
+
+test("pre-invitation questions: employer sends, candidate answers, employer invites in one step", async ({
+  page,
+}) => {
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci/application-example");
+  // Entry sits beside the decision on the default tab.
+  await expect(page.getByRole("tab", { name: "Odpowiedź", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.screenshot({ path: "artifacts/inquiry-employer-entry.png", fullPage: true });
+  await page.getByRole("button", { name: "Dopytaj przed zaproszeniem", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "Pytania", exact: true });
+  await expect(panel.getByRole("heading", { name: "Pytania do kandydata" })).toBeFocused();
+  await expect(panel.getByText("Nie pisze ich model AI.")).toBeVisible();
+  const items = panel.locator(".inquiry-question");
+  await expect(items).toHaveCount(3);
+  const send = panel.getByRole("button", { name: "Wyślij pytania kandydatowi", exact: true });
+  const toConversation = panel.getByRole("button", { name: "Weź pytania na rozmowę", exact: true });
+  // Questions are ready to use without per-question approval.
+  await expect(send).toBeEnabled();
+  await expect(toConversation).toBeEnabled();
+  await expect(panel.getByText("Do wykorzystania 3 z 3", { exact: true })).toBeVisible();
+  // While the path is being chosen, sending is the only primary action on the tab.
+  const pink = "rgb(255, 144, 232)";
+  const invite = page.getByRole("button", { name: "Zaproś na rozmowę", exact: true });
+  await expect(send).toHaveCSS("background-color", pink);
+  await expect(invite).not.toHaveCSS("background-color", pink);
+  await expect(panel.getByRole("button", { name: "Zatwierdź" })).toHaveCount(0);
+  // The recruiter-only comment is collapsed until asked for.
+  await expect(panel.locator(".inquiry-comment").first()).toBeHidden();
+  await items.nth(0).locator("summary").click();
+  await expect(items.nth(0).locator(".inquiry-comment")).toContainText("Sygnał ostrzegawczy");
+  await expect(items.nth(0)).toContainText("· z CV");
+
+  // An unsaved question edit survives a tab change, like the recruiter note.
+  await items.nth(0).getByRole("button", { name: "Zmień treść", exact: true }).click();
+  const editor = panel.getByLabel("Treść pytania 1");
+  await expect(editor).toBeFocused();
+  await expect(send).toBeDisabled();
+  const changed = "Które decyzje w automatyzacji obsługi zgłoszeń były Twoje?";
+  await editor.fill(changed);
+  await page.getByRole("tab", { name: "Odpowiedź", exact: true }).click();
+  await page.getByRole("button", { name: "Pokaż pytania", exact: true }).click();
+  await expect(editor).toHaveValue(changed);
+  await panel.getByRole("button", { name: "Zapisz treść", exact: true }).click();
+  await expect(
+    items.nth(0).getByRole("button", { name: "Zmień treść", exact: true }),
+  ).toBeFocused();
+  await expect(items.nth(0)).toContainText("zmienione przez Ciebie");
+  // The comment was written for the prepared wording and says so; the wording can be restored.
+  const original = "Opisz automatyzację obsługi zgłoszeń z Twojego CV.";
+  await expect(items.nth(0).locator("summary")).toContainText("dotyczy pierwotnego pytania");
+  await expect(items.nth(0).locator(".inquiry-stale")).toContainText(original);
+  await expect(items.nth(1).locator("summary")).not.toContainText("pierwotnego");
+  await items.nth(0).getByRole("button", { name: "Przywróć pierwotną treść", exact: true }).click();
+  await expect(
+    items.nth(0).getByRole("button", { name: "Zmień treść", exact: true }),
+  ).toBeFocused();
+  await expect(items.nth(0).locator(".inquiry-text")).toContainText(original);
+  await expect(items.nth(0).locator(".inquiry-stale")).toHaveCount(0);
+  await items.nth(0).getByRole("button", { name: "Zmień treść", exact: true }).click();
+  await editor.fill(changed);
+  await panel.getByRole("button", { name: "Zapisz treść", exact: true }).click();
+
+  const skip = items.nth(2).getByRole("button", { name: "Pomiń", exact: true });
+  await skip.click();
+  await expect(items.nth(2).getByRole("button", { name: "Przywróć", exact: true })).toBeFocused();
+  await expect(panel.getByText("Do wykorzystania 2 z 3", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "artifacts/inquiry-employer-draft.png", fullPage: true });
+  let accessibility = await new AxeBuilder({ page }).include(".recruiting-record").analyze();
+  expect(accessibility.violations).toEqual([]);
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    expect(await overflow()).toBe(true);
+    expect(
+      await items.nth(0).evaluate((element) => element.getBoundingClientRect().right <= innerWidth),
+    ).toBe(true);
+  }
+  await page.screenshot({ path: "artifacts/inquiry-employer-draft-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await send.click();
+  await expect(panel.getByRole("heading", { name: "Pytania wysłane" })).toBeFocused();
+  await expect(invite).toHaveCSS("background-color", pink);
+  await expect(panel.locator(".inquiry-question")).toHaveCount(2);
+  await expect(page.locator(".process-timeline")).toContainText("Wysłano pytania do kandydata");
+  await page.reload();
+  await page.goto("/#/app/kandydaci");
+  await expect(page.getByText("Pytania wysłane · czekamy na odpowiedzi")).toBeVisible();
+
+  await choose(page, "Marek Nowak");
+  await page.goto("/#/app/aplikacje");
+  await expect(page.getByText("Pracodawca czeka na Twoje odpowiedzi")).toBeVisible();
+  await page.goto("/#/app/aplikacje/application-example");
+  await expect(page.getByRole("tab", { name: "Pytania", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel).toContainText(changed);
+  await expect(panel).toContainText("O zaproszeniu decyduje rekruter.");
+  for (const hidden of ["Tylko dla Ciebie", "Sygnał ostrzegawczy", "Co sprawdzić na rozmowie"])
+    await expect(page.getByText(hidden)).toHaveCount(0);
+  await expect(page.locator(".recruiting-record")).not.toContainText("Podaj przykład zgłoszenia");
+  const answers = panel.getByRole("textbox");
+  await expect(answers).toHaveCount(2);
+  await answers.nth(0).fill("Za krótko");
+  await panel.getByRole("button", { name: "Wyślij odpowiedzi", exact: true }).click();
+  await expect(answers.nth(0)).toBeFocused();
+  await expect(panel.getByRole("alert")).toHaveCount(2);
+  const first =
+    "Sam zdecydowałem, które typy zgłoszeń trafiają do automatycznej odpowiedzi, i ustaliłem próg pewności z zespołem wsparcia.";
+  const second =
+    "Porównaliśmy medianę czasu pierwszej odpowiedzi z trzech miesięcy przed zmianą i po niej. Liczyłem to z eksportu systemu zgłoszeń.";
+  await answers.nth(0).fill(first);
+  await answers.nth(1).fill(second);
+  await page.getByRole("tab", { name: "CV", exact: true }).click();
+  await page.getByRole("tab", { name: "Pytania", exact: true }).click();
+  await expect(answers.nth(1)).toHaveValue(second);
+  await page.screenshot({ path: "artifacts/inquiry-candidate-form.png", fullPage: true });
+  accessibility = await new AxeBuilder({ page }).include(".recruiting-record").analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await overflow()).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await panel.getByRole("button", { name: "Wyślij odpowiedzi", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Twoje odpowiedzi" })).toBeFocused();
+  await expect(panel.getByRole("textbox")).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("tab", { name: "Pytania", exact: true }).click();
+  await expect(panel).toContainText(first);
+
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci");
+  const status = page.getByText("Odpowiedzi czekają na Twoją decyzję");
+  await expect(status).toBeVisible();
+  await expect(status).toHaveCSS("background-color", "rgb(255, 224, 247)");
+  await expect(status).toHaveCSS("border-radius", "18px");
+  await page.screenshot({ path: "artifacts/inquiry-employer-list.png" });
+  await page.goto("/#/app/kandydaci/application-example");
+  await expect(page.getByRole("tab", { name: "Pytania", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel.getByRole("heading", { name: "Odpowiedzi kandydata" })).toBeVisible();
+  await expect(panel).toContainText(second);
+  await expect(panel.locator(".inquiry-comment")).toHaveCount(2);
+  await expect(panel.locator(".inquiry-comment").first()).toBeVisible();
+  await expect(panel.locator(".inquiry-comment").first()).toContainText("Sygnał ostrzegawczy");
+  await expect(panel.locator(".inquiry-comment").first()).not.toContainText("Cel");
+  await expect(panel.locator(".inquiry-stale")).toHaveCount(1);
+  await expect(panel.locator(".inquiry-stale")).toContainText(original);
+  await expect(panel.getByRole("button", { name: "Zmień treść" })).toHaveCount(0);
+  await page.screenshot({ path: "artifacts/inquiry-employer-answers.png", fullPage: true });
+  accessibility = await new AxeBuilder({ page }).include(".recruiting-record").analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 800 });
+  expect(await overflow()).toBe(true);
+  await page.screenshot({ path: "artifacts/inquiry-employer-answers-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  // One click from a fresh application records the review step and the invitation.
+  await page.getByRole("button", { name: "Zaproś na rozmowę", exact: true }).click();
+  await expect(page.locator(".record-stage")).toHaveText("Zaproszenie na rozmowę");
+  await expect(page.locator(".record-stage")).toBeFocused();
+  await page.reload();
+  await expect(page.locator(".record-stage")).toHaveText("Zaproszenie na rozmowę");
+  await expect(page.locator(".process-timeline li")).toHaveCount(5);
+  await page.getByRole("tab", { name: "Pytania", exact: true }).click();
+  await expect(panel).toContainText(first);
+
+  await choose(page, "Tomasz Zieliński");
+  await page.goto("/#/app/kandydaci/application-example");
+  await expect(page.getByRole("heading", { name: "Nie znaleziono strony" })).toBeVisible();
+});
+
+test("pre-invitation questions can be taken to the conversation instead of being sent", async ({
+  page,
+}) => {
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci/application-example");
+  await page.getByRole("button", { name: "Dopytaj przed zaproszeniem", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "Pytania", exact: true });
+  await panel.getByRole("button", { name: "Weź pytania na rozmowę", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Pytania na rozmowę" })).toBeFocused();
+  await expect(panel).toContainText("Kandydat nie dostał tych pytań.");
+  await expect(panel.locator(".inquiry-comment")).toHaveCount(3);
+  await expect(panel.locator(".inquiry-comment").first()).toBeVisible();
+  await expect(panel.locator(".inquiry-comment").first()).toContainText("Cel");
+  // Per-question notes are for the conversation; the sheet note is for the decision.
+  await expect(page.getByLabel("Notatka do decyzji (widoczna pracodawcy)")).toBeVisible();
+  await expect(page.getByText("Notatka rekrutacyjna")).toHaveCount(0);
+  // The choice can be undone before the invitation.
+  await panel.getByRole("button", { name: "Wróć do wyboru", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Pytania do kandydata" })).toBeFocused();
+  await expect(page.getByLabel("Notatka rekrutacyjna (widoczna pracodawcy)")).toBeVisible();
+  await panel.getByRole("button", { name: "Weź pytania na rozmowę", exact: true }).click();
+  await page.getByRole("button", { name: "Zaproś na rozmowę", exact: true }).click();
+  await expect(page.locator(".record-stage")).toHaveText("Zaproszenie na rozmowę");
+  await expect(panel.getByRole("button", { name: "Wróć do wyboru" })).toHaveCount(0);
+  const save = panel.getByRole("button", { name: "Zapisz notatki", exact: true });
+  await expect(save).toBeDisabled();
+  const heard = "Opisał własną decyzję o progu pewności, bez liczb.";
+  await panel.getByLabel("Notatka z rozmowy do pytania 1").fill(heard);
+  await page.getByRole("tab", { name: "CV", exact: true }).click();
+  await page.getByRole("tab", { name: "Pytania", exact: true }).click();
+  await expect(panel.getByLabel("Notatka z rozmowy do pytania 1")).toHaveValue(heard);
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.screenshot({ path: "artifacts/inquiry-employer-conversation.png", fullPage: true });
+  const accessibility = await new AxeBuilder({ page }).include(".recruiting-record").analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  // After the invitation the decision area still leads back to the conversation guide.
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Odpowiedź", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(page.locator(".inquiry-entry")).toContainText("Masz pytania na tę rozmowę.");
+  await page.screenshot({ path: "artifacts/inquiry-employer-conversation-entry.png" });
+  await page.getByRole("button", { name: "Pokaż pytania", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Pytania na rozmowę" })).toBeFocused();
+  await expect(page.locator(".inquiry-entry")).toHaveCount(0);
+  await expect(panel.getByLabel("Notatka z rozmowy do pytania 1")).toHaveValue(heard);
+  await page.getByRole("button", { name: "Pierwsza rozmowa odbyta", exact: true }).click();
+  await page.getByRole("tab", { name: "CV", exact: true }).click();
+  await expect(page.locator(".inquiry-entry")).toContainText("Masz pytania i notatki z rozmowy.");
+  await page.goto("/#/app/kandydaci");
+  await expect(page.getByText("Pytania przygotowane na rozmowę")).toBeVisible();
+
+  // The candidate never sees questions kept for the conversation.
+  await choose(page, "Marek Nowak");
+  await page.goto("/#/app/aplikacje");
+  await expect(page.getByText("Pracodawca czeka na Twoje odpowiedzi")).toHaveCount(0);
+  await page.goto("/#/app/aplikacje/application-example");
+  await expect(page.getByRole("tab", { name: "Pytania", exact: true })).toHaveCount(0);
+  await expect(page.locator(".recruiting-record")).not.toContainText(heard);
+});
+
+test("recruiter adds an own question without a comment and the candidate answers it", async ({
+  page,
+}) => {
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci/application-example");
+  await page.getByRole("button", { name: "Dopytaj przed zaproszeniem", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "Pytania", exact: true });
+  const items = panel.locator(".inquiry-question");
+  const field = panel.getByLabel("Własne pytanie");
+  const add = panel.getByRole("button", { name: "Dodaj pytanie", exact: true });
+  await expect(add).toBeDisabled();
+  const own = "Jak dzielisz pracę z zespołem wsparcia przy zmianach w automatyzacji?";
+  await field.fill(own);
+  // The unsaved own question survives a tab change.
+  await page.getByRole("tab", { name: "CV", exact: true }).click();
+  await page.getByRole("tab", { name: "Pytania", exact: true }).click();
+  await expect(field).toHaveValue(own);
+  await add.click();
+  await expect(field).toHaveValue("");
+  await expect(items).toHaveCount(4);
+  await expect(items.nth(3)).toContainText("Twoje pytanie");
+  await expect(items.nth(3)).toContainText(own);
+  await expect(items.nth(3).locator("details")).toHaveCount(0);
+  await expect(panel.getByText("Do wykorzystania 4 z 4", { exact: true })).toBeVisible();
+  // Editing an own question never marks it as changed from a prepared wording.
+  await items.nth(3).getByRole("button", { name: "Zmień treść", exact: true }).click();
+  await panel.getByLabel("Treść pytania 4").fill(`${own} Podaj przykład.`);
+  await panel.getByRole("button", { name: "Zapisz treść", exact: true }).click();
+  await expect(items.nth(3)).not.toContainText("zmienione przez Ciebie");
+  // The limit is five questions; an own question can be removed.
+  await field.fill("Piąte pytanie do usunięcia?");
+  await add.click();
+  await expect(items).toHaveCount(5);
+  await expect(field).toHaveCount(0);
+  await expect(panel).toContainText("Więcej nie dodasz");
+  await items.nth(4).getByRole("button", { name: "Usuń", exact: true }).click();
+  await expect(items).toHaveCount(4);
+  await expect(panel.getByRole("heading", { name: "Pytania do kandydata" })).toBeFocused();
+  await expect(field).toBeVisible();
+  await page.screenshot({ path: "artifacts/inquiry-employer-own-question.png", fullPage: true });
+  const accessibility = await new AxeBuilder({ page }).include(".recruiting-record").analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await panel.getByRole("button", { name: "Wyślij pytania kandydatowi", exact: true }).click();
+
+  await choose(page, "Marek Nowak");
+  await page.goto("/#/app/aplikacje/application-example");
+  await expect(panel).toContainText(`${own} Podaj przykład.`);
+  await expect(page.getByText("Twoje pytanie")).toHaveCount(0);
+  const answers = panel.getByRole("textbox");
+  await expect(answers).toHaveCount(4);
+  for (let index = 0; index < 4; index++)
+    await answers.nth(index).fill(`Odpowiedź numer ${index + 1} z konkretnym przykładem.`);
+  await panel.getByRole("button", { name: "Wyślij odpowiedzi", exact: true }).click();
+
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci/application-example");
+  const last = panel.locator(".inquiry-question").nth(3);
+  await expect(last).toContainText("Odpowiedź numer 4 z konkretnym przykładem.");
+  await expect(last).toContainText("Twoje pytanie, bez przygotowanego komentarza.");
+  await expect(last.locator(".inquiry-comment")).toHaveCount(0);
+  await expect(panel.locator(".inquiry-comment")).toHaveCount(3);
+});
+
+test("unexpected page error shows recovery screen inside the shell without leaking data", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Forces a render error on the offer page only while the flag is set.
+  await page.addInitScript(() => {
+    // `format` is an accessor on the prototype, so wrap its original getter.
+    const original = Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype, "format")!;
+    Object.defineProperty(Intl.DateTimeFormat.prototype, "format", {
+      configurable: true,
+      get() {
+        if ((window as unknown as { __forceRenderError?: boolean }).__forceRenderError)
+          throw new Error("Wymuszony błąd testowy");
+        return original.get!.call(this);
+      },
+    });
+  });
+  const external: string[] = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+  });
+  await choose(page, "Anna Kowalska");
+  await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
+  await page.evaluate(() => {
+    (window as unknown as { __forceRenderError?: boolean }).__forceRenderError = true;
+  });
+  await page.goto("/#/oferty/ai-product-manager?q=prywatne-wyszukiwanie");
+
+  const heading = page.getByRole("heading", { name: "Coś poszło nie tak", level: 1 });
+  await expect(heading).toBeFocused();
+  await expect(page.getByRole("link", { name: "DoRoboty.ai" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pobierz kopię danych" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Skopiuj szczegóły błędu" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Skopiowano szczegóły" })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain("Widok: #/oferty/ai-product-manager");
+  expect(copied).toContain("Błąd: Error: Wymuszony błąd testowy");
+  expect(copied).not.toContain("prywatne");
+  expect(copied).not.toContain("Anna");
+
+  const issue = new URL(
+    (await page.getByRole("link", { name: /Zgłoś problem na GitHubie/ }).getAttribute("href"))!,
+  );
+  expect(issue.searchParams.get("szczegoly")).toBe(copied);
+  expect(issue.href).not.toContain("prywatne");
+
+  await page.getByText("Co zawierają szczegóły?").click();
+  await expect(page.locator(".app-error pre")).toHaveText(copied);
+  const accessibility = await new AxeBuilder({ page }).include(".app-error").analyze();
+  expect(accessibility.violations).toEqual([]);
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await page.screenshot({ path: "artifacts/app-error-mobile.png", fullPage: true });
+
+  await page.evaluate(() => {
+    (window as unknown as { __forceRenderError?: boolean }).__forceRenderError = false;
+  });
+  await page.getByRole("link", { name: "Wróć na stronę główną" }).click();
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(heading).toHaveCount(0);
+  await page.goto("/#/oferty/ai-product-manager");
+  await expect(page.getByRole("heading", { level: 1 })).not.toHaveText("Coś poszło nie tak");
+  expect(external).toEqual([]);
+});
+
+test("report problem dialog explains public GitHub issues and links to a prefilled form", async ({
+  page,
+}) => {
+  const external: string[] = [];
+  page.on("request", (r) => {
+    if (!r.url().startsWith("http://127.0.0.1:3106")) external.push(r.url());
+  });
+  await page.goto("/#/oferty?q=prywatne-wyszukiwanie");
+  const trigger = page.getByRole("contentinfo").getByRole("button", { name: "Zgłoś problem" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Zgłoś problem" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("publiczne issue");
+  await expect(dialog).toContainText("Zgłoszenie jest publiczne.");
+  const link = dialog.getByRole("link", { name: /Otwórz zgłoszenie na GitHubie/ });
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  const url = new URL((await link.getAttribute("href"))!);
+  expect(url.origin + url.pathname).toBe("https://github.com/DestroTM/doroboty-ai/issues/new");
+  expect(url.searchParams.get("template")).toBe("zgloszenie-testera.yml");
+  expect(url.searchParams.get("widok")).toBe("#/oferty");
+  expect(url.href).not.toContain("prywatne");
+  const accessibility = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await trigger.click();
+    const box = (await dialog.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await expect(dialog).toHaveCSS("opacity", "1");
+    if (width === 390) await page.screenshot({ path: "artifacts/report-problem-mobile.png" });
+    await dialog.getByRole("button", { name: "Zamknij", exact: true }).last().click();
+    await expect(dialog).toBeHidden();
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await choose(page, "Karolina Wiśniewska");
+  await page.goto("/#/app/kandydaci");
+  const sidebarTrigger = page
+    .getByRole("navigation", { name: "Panel użytkownika" })
+    .getByRole("button", { name: "Zgłoś problem" });
+  await sidebarTrigger.click();
+  const sidebarUrl = new URL(
+    (await dialog.getByRole("link", { name: /Otwórz zgłoszenie/ }).getAttribute("href"))!,
+  );
+  expect(sidebarUrl.searchParams.get("widok")).toBe("#/app/kandydaci");
+  expect(sidebarUrl.href).not.toContain("Karolina");
+  await expect(dialog).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: "artifacts/report-problem-desktop.png" });
+  await page.keyboard.press("Escape");
+  await expect(sidebarTrigger).toBeFocused();
+  expect(external).toEqual([]);
+});
+
+test("platform illustration loads a small resized variant on phones", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const images: { url: string; bytes: number }[] = [];
+  page.on("response", async (r) => {
+    if (r.request().resourceType() === "image")
+      images.push({ url: r.url(), bytes: (await r.body()).length });
+  });
+  for (const path of ["/#/", "/#/oferty"]) {
+    await page.goto(path);
+    const art = page.getByRole("img", { name: "Dwie osoby pracujące razem z laptopem" });
+    await expect(art).toBeVisible();
+    await expect.poll(() => art.evaluate((img: HTMLImageElement) => img.complete)).toBe(true);
+    expect(await art.evaluate((img: HTMLImageElement) => img.currentSrc)).toMatch(
+      /people-\d+.*\.webp$/,
+    );
+  }
+  expect(images.some((image) => image.url.includes("people") && image.url.endsWith(".png"))).toBe(
+    false,
+  );
+  for (const image of images.filter((image) => image.url.includes("people")))
+    expect(image.bytes).toBeLessThan(100_000);
 });
