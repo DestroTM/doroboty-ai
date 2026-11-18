@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Checks that the published site responds and serves the build of the current checkout.
+# Usage: scripts/check-production <https-url>  (run `npm run build` first)
+# Exits non-zero when the site is down or still serves another version after the
+# grace period, so the GitHub Actions run fails and GitHub notifies the owner.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+url="${1:?Pass the production URL, for example https://doroboty-ai-ag.netlify.app}"
+url="${url%/}"
+attempts="${CHECK_ATTEMPTS:-15}"
+pause="${CHECK_PAUSE_SECONDS:-40}"
+
+[[ "$url" == https://* ]] || { echo "::error::Address must start with https://: $url"; exit 1; }
+[[ -f dist/index.html ]] || { echo "::error::dist/index.html is missing; run npm run build first."; exit 1; }
+
+# Asset references produced by the local build, e.g. assets/index-AbC123.js
+expected="$(grep -oE '(src|href)="\./assets/[^"]+"' dist/index.html | sed -E 's/^(src|href)="\.\///; s/"$//' | sort -u | tr '\n' ' ')"
+[[ -n "${expected// /}" ]] || { echo "::error::No asset references found in dist/index.html."; exit 1; }
+
+fetch() { curl --silent --show-error --fail --location --max-time 20 --retry 2 --retry-delay 5 "$@"; }
+
+for attempt in $(seq 1 "$attempts"); do
+  if live="$(fetch "$url/")"; then
+    missing=""
+    for asset in $expected; do
+      grep -qF "./$asset" <<<"$live" || missing="$missing $asset"
+    done
+    if [[ -z "$missing" ]]; then
+      for asset in $expected; do
+        fetch --output /dev/null "$url/$asset" || { echo "::error::$url/$asset does not load."; exit 1; }
+      done
+      echo "OK: $url responds and serves this build ($expected)."
+      exit 0
+    fi
+    reason="serves another version (missing:$missing)"
+  else
+    reason="does not respond with HTTP 2xx"
+  fi
+  echo "Attempt $attempt/$attempts: $url $reason."
+  [[ "$attempt" -lt "$attempts" ]] && sleep "$pause"
+done
+
+echo "::error::$url $reason. Check the latest deploy in Netlify (Deploys) and docs/release.md."
+exit 1
