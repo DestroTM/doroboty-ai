@@ -1,0 +1,36 @@
+name: Production check
+# Fails when the published site is down or does not serve the build of main.
+# A failed run makes GitHub notify the person who triggered it (scheduled runs:
+# the workflow author), if Actions notifications are enabled in their GitHub settings.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Address to check (a wrong address tests the failure notification)
+        required: true
+        default: https://doroboty-ai-ag.netlify.app
+permissions:
+  contents: read
+concurrency:
+  group: production-check
+  cancel-in-progress: true
+jobs:
+  check:
+    name: Production responds and serves main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRODUCTION_URL: ${{ inputs.url || 'https://doroboty-ai-ag.netlify.app' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: scripts/check-production "$PRODUCTION_URL"
