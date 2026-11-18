@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { issueUrl } from "./error-report";
-import { posthogLogger } from "@/lib/posthog-logger";
+import { posthogLogger } from "@/lib/posthog";
 
 /**
  * "Zgłoś problem": C18 information dialog explaining that reports go to a

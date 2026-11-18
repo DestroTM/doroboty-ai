@@ -1,11 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import posthog from "posthog-js";
 import { currentPerson, initialState, transition, type Action, type State } from "./model";
 import { parseState, readState, saveState, type StoragePort } from "./storage";
+import { identifyPerson, posthogConfigured, resetIdentity } from "@/lib/posthog";
 
-const posthogConfigured = Boolean(
-  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-);
 function browserStorage(): StoragePort | null {
   try {
     return window.localStorage;
@@ -24,12 +21,7 @@ function useStore() {
   const activePerson = currentPerson(state);
 
   function resetPosthogIdentity() {
-    if (!posthogConfigured) return;
-    try {
-      posthog.reset();
-    } catch {
-      // Analytics must not interfere with switching prototype people.
-    }
+    resetIdentity();
     identifiedPersonId.current = null;
   }
 
@@ -84,12 +76,8 @@ function useStore() {
   useEffect(() => {
     if (!posthogConfigured || !activePerson || identifiedPersonId.current === activePerson.id)
       return;
-    try {
-      posthog.identify(activePerson.id, { name: activePerson.name, role: activePerson.role });
-      identifiedPersonId.current = activePerson.id;
-    } catch {
-      // Analytics must not interfere with loading the prototype.
-    }
+    identifyPerson(activePerson.id, activePerson.role);
+    identifiedPersonId.current = activePerson.id;
   }, [activePerson]);
   return {
     state,

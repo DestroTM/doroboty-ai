@@ -1,6 +1,5 @@
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import posthog from "posthog-js";
 import { ArrowUpRight, Users, MapPin, BriefcaseBusiness, Bookmark } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Search, ArrowRight, Monitor, X } from "lucide-react";
@@ -27,10 +26,7 @@ import { usePrototype } from "./store";
 import { currentPerson, publishedJobs } from "./model";
 import { NotFound } from "./shell";
 import { cn } from "@/lib/utils";
-
-const posthogConfigured = Boolean(
-  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-);
+import { capture } from "@/lib/posthog";
 
 function LocalMap({ jobs }: { jobs: JobWithCompany[] }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -152,12 +148,11 @@ export function JobsPage() {
       else next.delete(key);
     }
     setParams(next);
-    if (posthogConfigured)
-      posthog.capture("job_search_submitted", {
-        has_query: Boolean(next.get("query")),
-        has_location: Boolean(next.get("location")),
-        result_count: filterJobs(all, parseJobFilters(Object.fromEntries(next))).length,
-      });
+    capture("job_search_submitted", {
+      has_query: Boolean(next.get("query")),
+      has_location: Boolean(next.get("location")),
+      result_count: filterJobs(all, parseJobFilters(Object.fromEntries(next))).length,
+    });
   }
   const locations = [...new Set(all.flatMap((x) => x.locations))];
   return (
@@ -438,8 +433,8 @@ export function JobPage() {
                     aria-label="Zapisz ofertę"
                     aria-pressed={saved}
                     onClick={() => {
-                      if (run({ type: "toggle_saved", jobId: job.id }) && posthogConfigured)
-                        posthog.capture("job_saved_toggled", {
+                      if (run({ type: "toggle_saved", jobId: job.id }))
+                        capture("job_saved_toggled", {
                           job_id: job.id,
                           job_category: job.category,
                           saved: !saved,

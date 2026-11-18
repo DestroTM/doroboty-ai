@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import posthog from "posthog-js";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ApplicationRecord } from "./application-record";
@@ -11,10 +10,7 @@ import {
 } from "./inquiry";
 import { inquiryStages, nextStages, stageLabels, type Application, type Stage } from "./model";
 import { usePrototype } from "./store";
-
-const posthogConfigured = Boolean(
-  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-);
+import { capture } from "@/lib/posthog";
 
 /** Decision wording on buttons; the recorded stage names stay unchanged. */
 const actionLabels: Partial<Record<Stage, string>> = {
@@ -69,11 +65,10 @@ export function RecruitingApplication({ application }: { application: Applicatio
         })
       )
         return;
-    if (posthogConfigured)
-      posthog.capture("application_stage_changed", {
-        application_id: application.id,
-        stage,
-      });
+    capture("application_stage_changed", {
+      application_id: application.id,
+      stage,
+    });
     setNote("");
     setAnnouncement(`Zapisano etap: ${stageLabels[stage]}.`);
     pendingFocus.current = "status";
@@ -128,8 +123,7 @@ export function RecruitingApplication({ application }: { application: Applicatio
                       if (!application.inquiry) {
                         if (!run({ type: "inquiry_prepare", applicationId: application.id }))
                           return;
-                        if (posthogConfigured)
-                          posthog.capture("inquiry_prepared", { application_id: application.id });
+                        capture("inquiry_prepared", { application_id: application.id });
                       }
                       pendingFocus.current = "questions";
                       setSection("questions");

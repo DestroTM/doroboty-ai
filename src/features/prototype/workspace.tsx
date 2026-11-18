@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
-import posthog from "posthog-js";
 import { CheckCircle2, FileText } from "lucide-react";
 import { ConfettiBurst, type ConfettiOrigin } from "@/components/confetti-burst";
 import { BackLink } from "@/components/back-link";
@@ -18,10 +17,7 @@ import { MatchScore } from "./match-score";
 import { RecruitingApplication } from "./recruiting-application";
 import { CandidateApplication } from "./candidate-application";
 import { inquiryStatusLine } from "./inquiry";
-
-const posthogConfigured = Boolean(
-  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-);
+import { capture } from "@/lib/posthog";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -163,7 +159,7 @@ export function ProfilePage({ preview = false }: { preview?: boolean }) {
         },
       })
     ) {
-      if (posthogConfigured) posthog.capture("profile_saved");
+      capture("profile_saved");
       setMessage("Profil został zapisany.");
     }
   }
@@ -290,11 +286,10 @@ export function ApplyPage() {
       return;
     }
     if (run({ type: "submit", jobId: job!.id, notes, generated, answer, consent })) {
-      if (posthogConfigured)
-        posthog.capture("application_submitted", {
-          job_id: job!.id,
-          job_category: job!.category,
-        });
+      capture("application_submitted", {
+        job_id: job!.id,
+        job_category: job!.category,
+      });
       submittedOnce.current = true;
       setSubmitted(true);
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -401,11 +396,10 @@ export function ApplyPage() {
                 variant="outline"
                 onClick={() => {
                   if (run({ type: "draft", jobId: job.id, notes, generated, answer })) {
-                    if (posthogConfigured)
-                      posthog.capture("application_draft_saved", {
-                        job_id: job.id,
-                        job_category: job.category,
-                      });
+                    capture("application_draft_saved", {
+                      job_id: job.id,
+                      job_category: job.category,
+                    });
                     setMessage("Szkic został zapisany.");
                   }
                 }}
